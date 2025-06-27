@@ -229,6 +229,7 @@ _C.UNSUPERVISED = CN()
 _C.UNSUPERVISED.METHOD = []
 _C.UNSUPERVISED.OUTPUT_SAVE_DIR = ''
 _C.UNSUPERVISED.METRICS = []
+_C.UNSUPERVISED.EXP_PROCESS = False
 # Unsupervised.Data settings
 _C.UNSUPERVISED.DATA = CN()
 _C.UNSUPERVISED.DATA.INFO = CN()
@@ -369,7 +370,8 @@ _C.NUM_OF_GPU_TRAIN = 1
 # -----------------------------------------------------------------------------
 _C.LOG = CN()
 _C.LOG.PATH = "runs/exp"
-
+_C.DO_ORDER_BPF = 1
+_C.DO_HILBERT = False
 
 def _update_config_from_file(config, cfg_file):
     config.defrost()

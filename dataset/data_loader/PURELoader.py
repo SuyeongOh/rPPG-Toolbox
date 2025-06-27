@@ -6,16 +6,20 @@ Stricker, R., Müller, S., Gross, H.-M.
 Non-contact Video-based Pulse Rate Measurement on a Mobile Service Robot
 in: Proc. 23st IEEE Int. Symposium on Robot and Human Interactive Communication (Ro-Man 2014), Edinburgh, Scotland, UK, pp. 1056 - 1062, IEEE 2014
 """
-import glob
+import argparse
 import glob
 import json
 import os
-import re
+import random
 
 import cv2
 import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from dataset import data_loader
 from dataset.data_loader.BaseLoader import BaseLoader
-from tqdm import tqdm
+from neural_methods import trainer
 
 
 class PURELoader(BaseLoader):
@@ -106,7 +110,8 @@ class PURELoader(BaseLoader):
         if 'None' in config_preprocess.DATA_AUG:
             # Utilize dataset-specific function to read video
             frames = self.read_video(
-                os.path.join(data_dirs[i]['path'], filename, ""))
+                os.path.join(data_dirs[i]['path'], ""))
+
         elif 'Motion' in config_preprocess.DATA_AUG:
             # Utilize general function to read video in .npy format
             frames = self.read_npy_video(
@@ -146,3 +151,51 @@ class PURELoader(BaseLoader):
             waves = [label["Value"]["waveform"]
                      for label in labels["/FullPackage"]]
         return np.asarray(waves)
+
+
+from config import _C, update_config
+
+def get_config(args):
+    # Return a clone so that the defaults will not be altered
+    # This is for the "local variable" use pattern
+    config = _C.clone()
+    update_config(config, args)
+
+    return config
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2 ** 32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+general_generator = torch.Generator()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config_file', required=False,
+                        default="../../configs/infer_configs/PURE_UNSUPERVISED.yaml", type=str, help="The name of the model.")
+    parser = trainer.BaseTrainer.BaseTrainer.add_trainer_args(parser)
+    parser = data_loader.BaseLoader.BaseLoader.add_data_loader_args(parser)
+    args = parser.parse_args()
+
+    config = get_config(args)
+
+    test_loader = data_loader.PURELoader.PURELoader
+    test_data = test_loader(
+        name="unsupervised",
+        data_path="E://vitalvideos_tvstorm/dataset/PURE",
+        config_data=config.UNSUPERVISED.DATA,
+        device=config.DEVICE)
+
+    data_loader_dict = {}
+
+    data_loader_dict["unsupervised"] = DataLoader(
+        dataset=test_data,
+        num_workers=16,
+        batch_size=config.INFERENCE.BATCH_SIZE,
+        shuffle=False,
+        worker_init_fn=seed_worker,
+        generator=general_generator
+    )
+
+    print()

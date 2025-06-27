@@ -1,3 +1,6 @@
+import csv
+import os
+
 import numpy as np
 import pandas as pd
 import torch
@@ -41,6 +44,7 @@ def _reform_data_from_dict(data, flatten=True):
 
     return sort_data
 
+headers = ['ENV', 'MAE', 'RMSE', 'MAPE', 'Pearson', 'SNR']
 
 def calculate_metrics(predictions, labels, config):
     """Calculate rPPG Metrics (MAE, RMSE, MAPE, Pearson Coef.)."""
@@ -78,7 +82,7 @@ def calculate_metrics(predictions, labels, config):
                 diff_flag_test = True
             else:
                 raise ValueError("Unsupported label type in testing!")
-            
+
             if config.INFERENCE.EVALUATION_METHOD == "peak detection":
                 gt_hr_peak, pred_hr_peak, SNR, macc = calculate_metric_per_video(
                     pred_window, label_window, diff_flag=diff_flag_test, fs=config.TEST.DATA.FS, hr_method='Peak')
@@ -95,7 +99,7 @@ def calculate_metrics(predictions, labels, config):
                 MACC_all.append(macc)
             else:
                 raise ValueError("Inference evaluation method name wrong!")
-    
+
     # Filename ID to be used in any results files (e.g., Bland-Altman plots) that get saved
     if config.TOOLBOX_MODE == 'train_and_test':
         filename_id = config.TRAIN.MODEL_FILE_NAME
@@ -104,6 +108,18 @@ def calculate_metrics(predictions, labels, config):
         filename_id = model_file_root + "_" + config.TEST.DATA.DATASET
     else:
         raise ValueError('Metrics.py evaluation only supports train_and_test and only_test!')
+
+    print(f"====== DISPLAY METRICS ======")
+    resize_size = config.TEST.DATA.PREPROCESS.RESIZE.W
+    print(f"DATA IMAGE RESOLUTION: [{resize_size} x {resize_size}], ORDER_BPF={config.DO_ORDER_BPF}, HILBERT={config.DO_HILBERT}")
+    csv_file = f'./results/result_{config.MODEL.NAME}.csv'
+
+    if not os.path.exists(csv_file):
+        with open(csv_file, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+
+    result_row = [f'{resize_size}x{resize_size}, BPF={config.DO_ORDER_BPF}, HILBERT={config.DO_HILBERT}']
 
     if config.INFERENCE.EVALUATION_METHOD == "FFT":
         gt_hr_fft_all = np.array(gt_hr_fft_all)
@@ -115,35 +131,36 @@ def calculate_metrics(predictions, labels, config):
             if metric == "MAE":
                 MAE_FFT = np.mean(np.abs(predict_hr_fft_all - gt_hr_fft_all))
                 standard_error = np.std(np.abs(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
-                print("FFT MAE (FFT Label): {0} +/- {1}".format(MAE_FFT, standard_error))
+                result_row.append(f'{MAE_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT MAE (FFT Label): {0:.3f} +/- {1:.3f}".format(MAE_FFT, standard_error))
             elif metric == "RMSE":
-                # Calculate the squared errors, then RMSE, in order to allow
-                # for a more robust and intuitive standard error that won't
-                # be influenced by abnormal distributions of errors.
-                squared_errors = np.square(predict_hr_fft_all - gt_hr_fft_all)
-                RMSE_FFT = np.sqrt(np.mean(squared_errors))
-                standard_error = np.sqrt(np.std(squared_errors) / np.sqrt(num_test_samples))
-                print("FFT RMSE (FFT Label): {0} +/- {1}".format(RMSE_FFT, standard_error))
+                RMSE_FFT = np.sqrt(np.mean(np.square(predict_hr_fft_all - gt_hr_fft_all)))
+                standard_error = np.std(np.square(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
+                result_row.append(f'{RMSE_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT RMSE (FFT Label): {0:.3f} +/- {1:.3f}".format(RMSE_FFT, standard_error))
             elif metric == "MAPE":
                 MAPE_FFT = np.mean(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) * 100
                 standard_error = np.std(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) / np.sqrt(num_test_samples) * 100
-                print("FFT MAPE (FFT Label): {0} +/- {1}".format(MAPE_FFT, standard_error))
+                result_row.append(f'{MAPE_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT MAPE (FFT Label): {0:.3f} +/- {1:.3f}".format(MAPE_FFT, standard_error))
             elif metric == "Pearson":
                 Pearson_FFT = np.corrcoef(predict_hr_fft_all, gt_hr_fft_all)
                 correlation_coefficient = Pearson_FFT[0][1]
                 standard_error = np.sqrt((1 - correlation_coefficient**2) / (num_test_samples - 2))
-                print("FFT Pearson (FFT Label): {0} +/- {1}".format(correlation_coefficient, standard_error))
+                result_row.append(f'{correlation_coefficient:.3f} ± {standard_error:.3f}')
+                print("FFT Pearson (FFT Label): {0:.3f} +/- {1:.3f}".format(correlation_coefficient, standard_error))
             elif metric == "SNR":
                 SNR_FFT = np.mean(SNR_all)
                 standard_error = np.std(SNR_all) / np.sqrt(num_test_samples)
-                print("FFT SNR (FFT Label): {0} +/- {1} (dB)".format(SNR_FFT, standard_error))
+                result_row.append(f'{SNR_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT SNR (FFT Label): {0:.3f} +/- {1:.3f} (dB)".format(SNR_FFT, standard_error))
             elif metric == "MACC":
                 MACC_avg = np.mean(MACC_all)
                 standard_error = np.std(MACC_all) / np.sqrt(num_test_samples)
                 print("FFT MACC (FFT Label): {0} +/- {1}".format(MACC_avg, standard_error))
             elif "AU" in metric:
                 pass
-            elif "BA" in metric:  
+            elif "BA" in metric:
                 compare = BlandAltman(gt_hr_fft_all, predict_hr_fft_all, config, averaged=True)
                 compare.scatter_plot(
                     x_label='GT PPG HR [bpm]',
@@ -159,6 +176,11 @@ def calculate_metrics(predictions, labels, config):
                     file_name=f'{filename_id}_FFT_BlandAltman_DifferencePlot.pdf')
             else:
                 raise ValueError("Wrong Test Metric Type")
+
+        with open(csv_file, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(result_row)
+
     elif config.INFERENCE.EVALUATION_METHOD == "peak detection":
         gt_hr_peak_all = np.array(gt_hr_peak_all)
         predict_hr_peak_all = np.array(predict_hr_peak_all)

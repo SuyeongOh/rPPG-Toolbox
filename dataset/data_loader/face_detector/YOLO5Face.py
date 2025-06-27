@@ -93,3 +93,7 @@ class YOLO5Face(object):
                 res = None
             
             return res
+
+
+
+YOLO5Face()

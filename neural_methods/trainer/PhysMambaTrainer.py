@@ -32,6 +32,12 @@ class PhysMambaTrainer(BaseTrainer):
         self.min_valid_loss = None
         self.best_epoch = 0
         self.diff_flag = 0
+
+        import os
+        os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        os.environ["TORCH_USE_CUDA_DSA"] = '1'
+
         if config.TRAIN.DATA.PREPROCESS.LABEL_TYPE == "DiffNormalized":
             self.diff_flag = 1
         self.frame_rate = config.TRAIN.DATA.FS

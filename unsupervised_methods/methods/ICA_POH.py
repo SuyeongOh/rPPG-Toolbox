@@ -11,12 +11,12 @@ from scipy import signal
 from unsupervised_methods import utils
 
 
-def ICA_POH(frames, FS):
+def ICA_POH(config, frames):
     # Cut off frequency.
     LPF = 0.7
     HPF = 2.5
     RGB = process_video(frames)
-
+    FS = config.UNSUPERVISED.DATA.FS
     NyquistF = 1 / 2 * FS
     BGRNorm = np.zeros(RGB.shape)
     Lambda = 100
@@ -40,10 +40,13 @@ def ICA_POH(frames, FS):
         MaxPx[0, c] = np.max(Px)
     MaxComp = np.argmax(MaxPx)
     BVP_I = S[MaxComp, :]
-    B, A = signal.butter(3, [LPF / NyquistF, HPF / NyquistF], 'bandpass')
-    BVP_F = signal.filtfilt(B, A, np.real(BVP_I).astype(np.double))
+    if config.DO_ORDER_BPF != 0:
+        B, A = signal.butter(config.DO_ORDER_BPF, [LPF / NyquistF, HPF / NyquistF], 'bandpass')
+        BVP_F = signal.filtfilt(B, A, np.real(BVP_I).astype(np.double))
+        BVP = BVP_F[0]
+    else:
+        BVP = np.real(BVP_I)
 
-    BVP = BVP_F[0]
     return BVP
 
 

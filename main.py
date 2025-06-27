@@ -1,11 +1,14 @@
 """ The main function of rPPG deep learning pipeline."""
 
 import argparse
+import datetime
 import random
 import time
 
 import numpy as np
 import torch
+import yaml
+
 from config import get_config
 from dataset import data_loader
 from neural_methods import trainer
@@ -88,7 +91,8 @@ def train_and_test(config, data_loader_dict):
     model_trainer.train(data_loader_dict)
     model_trainer.test(data_loader_dict)
 
-
+target_resolution_list = [128]
+tf_list = [False, True]
 def test(config, data_loader_dict):
     """Tests the model."""
     if config.MODEL.NAME == "Physnet":
@@ -120,8 +124,8 @@ def unsupervised_method_inference(config, data_loader):
     if not config.UNSUPERVISED.METHOD:
         raise ValueError("Please set unsupervised method in yaml!")
     for unsupervised_method in config.UNSUPERVISED.METHOD:
-        if unsupervised_method == "POS":
-            unsupervised_predict(config, data_loader, "POS")
+        if "POS" in unsupervised_method:
+            unsupervised_predict(config, data_loader, unsupervised_method)
         elif unsupervised_method == "CHROM":
             unsupervised_predict(config, data_loader, "CHROM")
         elif unsupervised_method == "ICA":
@@ -138,7 +142,12 @@ def unsupervised_method_inference(config, data_loader):
             raise ValueError("Not supported unsupervised method!")
 
 
+import sys
+
 if __name__ == "__main__":
+    #모든 print 로그 추가
+    sys.stdout = open(f'./logs/{str(datetime.datetime.now()).replace(":", "_")[:19]}_log.txt', 'w')
+
     # parse arguments.
     parser = argparse.ArgumentParser()
     parser = add_args(parser)
@@ -170,6 +179,8 @@ if __name__ == "__main__":
             train_loader = data_loader.UBFCPHYSLoader.UBFCPHYSLoader
         elif config.TRAIN.DATA.DATASET == "iBVP":
             train_loader = data_loader.iBVPLoader.iBVPLoader
+        elif config.TRAIN.DATA.DATASET == "vv100":
+            test_loader = data_loader.vv100Loader.vv100Loader
         else:
             raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
                              SCAMPS, BP4D+ (Normal and BigSmall preprocessing), UBFC-PHYS and iBVP.")
@@ -211,6 +222,8 @@ if __name__ == "__main__":
             valid_loader = data_loader.UBFCPHYSLoader.UBFCPHYSLoader
         elif config.VALID.DATA.DATASET == "iBVP":
             valid_loader = data_loader.iBVPLoader.iBVPLoader
+        elif config.VALID.DATA.DATASET == "vv100":
+            test_loader = data_loader.vv100Loader.vv100Loader
         elif config.VALID.DATA.DATASET is None and not config.TEST.USE_LAST_EPOCH:
             raise ValueError("Validation dataset not specified despite USE_LAST_EPOCH set to False!")
         else:
@@ -254,6 +267,8 @@ if __name__ == "__main__":
             test_loader = data_loader.UBFCPHYSLoader.UBFCPHYSLoader
         elif config.TEST.DATA.DATASET == "iBVP":
             test_loader = data_loader.iBVPLoader.iBVPLoader
+        elif config.TEST.DATA.DATASET == "vv100":
+            test_loader = data_loader.vv100Loader.vv100Loader
         else:
             raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
                              SCAMPS, BP4D+ (Normal and BigSmall preprocessing), UBFC-PHYS and iBVP.")
@@ -261,6 +276,7 @@ if __name__ == "__main__":
         if config.TOOLBOX_MODE == "train_and_test" and config.TEST.USE_LAST_EPOCH:
             print("Testing uses last epoch, validation dataset is not required.", end='\n\n')   
 
+        import os
         # Create and initialize the test dataloader given the correct toolbox mode,
         # a supported dataset name, and a valid dataset path
         if config.TEST.DATA.DATASET and config.TEST.DATA.DATA_PATH:
@@ -299,20 +315,121 @@ if __name__ == "__main__":
         else:
             raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
                              SCAMPS, BP4D+, UBFC-PHYS and iBVP.")
-        
-        unsupervised_data = unsupervised_loader(
-            name="unsupervised",
-            data_path=config.UNSUPERVISED.DATA.DATA_PATH,
-            config_data=config.UNSUPERVISED.DATA,
-            device=config.DEVICE)
-        data_loader_dict["unsupervised"] = DataLoader(
-            dataset=unsupervised_data,
-            num_workers=16,
-            batch_size=1,
-            shuffle=False,
-            worker_init_fn=seed_worker,
-            generator=general_generator
-        )
+
+        if config.UNSUPERVISED.EXP_PROCESS :
+            for target_resolution in target_resolution_list:
+                with open(args.config_file, 'r') as f:
+                    config = yaml.safe_load(f)
+
+                config['UNSUPERVISED']['DATA']['PREPROCESS']['RESIZE']['H'] = target_resolution
+                config['UNSUPERVISED']['DATA']['PREPROCESS']['RESIZE']['W'] = target_resolution
+
+                with open(args.config_file, 'w') as f:
+                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+                config = get_config(args)
+                unsupervised_data = unsupervised_loader(
+                    name="unsupervised",
+                    data_path=config.UNSUPERVISED.DATA.DATA_PATH,
+                    config_data=config.UNSUPERVISED.DATA,
+                    device=config.DEVICE)
+                data_loader_dict["unsupervised"] = DataLoader(
+                    dataset=unsupervised_data,
+                    num_workers=16,
+                    batch_size=1,
+                    shuffle=False,
+                    worker_init_fn=seed_worker,
+                    generator=general_generator
+                )
+
+                config.defrost()
+                TEST_BPF_LIST = [1, 2, 3, 4, 5, 6]
+                for target_order in TEST_BPF_LIST:
+                    config.DO_ORDER_BPF = target_order
+                    for tf_hilbert in tf_list:
+                        config.DO_HILBERT = tf_hilbert
+                        unsupervised_method_inference(config, data_loader_dict)
+            sys.exit()
+
+        else:
+            unsupervised_data = unsupervised_loader(
+                name="unsupervised",
+                data_path=config.UNSUPERVISED.DATA.DATA_PATH,
+                config_data=config.UNSUPERVISED.DATA,
+                device=config.DEVICE)
+            data_loader_dict["unsupervised"] = DataLoader(
+                dataset=unsupervised_data,
+                num_workers=16,
+                batch_size=1,
+                shuffle=False,
+                worker_init_fn=seed_worker,
+                generator=general_generator
+            )
+
+    elif config.TOOLBOX_MODE == "loop_test":
+        for target_resolution in target_resolution_list:
+            with open(args.config_file, 'r') as f:
+                config = yaml.safe_load(f)
+
+            config['TEST']['DATA']['PREPROCESS']['RESIZE']['H'] = target_resolution
+            config['TEST']['DATA']['PREPROCESS']['RESIZE']['W'] = target_resolution
+
+            with open(args.config_file, 'w') as f:
+                yaml.dump(config, f, default_flow_style=False)
+
+            config = get_config(args)
+            # test_loader
+            if config.TEST.DATA.DATASET == "COHFACE":
+                test_loader = data_loader.COHFACELoader.COHFACELoader
+            elif config.TEST.DATA.DATASET == "UBFC":
+                test_loader = data_loader.UBFCrPPGLoader.UBFCrPPGLoader
+            elif config.TEST.DATA.DATASET == "PURE":
+                test_loader = data_loader.PURELoader.PURELoader
+            elif config.TEST.DATA.DATASET == "SCAMPS":
+                test_loader = data_loader.SCAMPSLoader.SCAMPSLoader
+            elif config.TEST.DATA.DATASET == "MMPD":
+                test_loader = data_loader.MMPDLoader.MMPDLoader
+            elif config.TEST.DATA.DATASET == "BP4DPlus":
+                test_loader = data_loader.BP4DPlusLoader.BP4DPlusLoader
+            elif config.TEST.DATA.DATASET == "BP4DPlusBigSmall":
+                test_loader = data_loader.BP4DPlusBigSmallLoader.BP4DPlusBigSmallLoader
+            elif config.TEST.DATA.DATASET == "UBFC-PHYS":
+                test_loader = data_loader.UBFCPHYSLoader.UBFCPHYSLoader
+            elif config.TEST.DATA.DATASET == "vv100":
+                test_loader = data_loader.vv100Loader.vv100Loader
+            elif config.TEST.DATA.DATASET == "VIPL-HR":
+                test_loader = data_loader.VIPLHRLoader.VIPLHRLoader
+            else:
+                raise ValueError("Unsupported dataset! Currently supporting UBFC-rPPG, PURE, MMPD, \
+                                 SCAMPS, BP4D+ (Normal and BigSmall preprocessing), and UBFC-PHYS.")
+
+            if config.TOOLBOX_MODE == "train_and_test" and config.TEST.USE_LAST_EPOCH:
+                print("Testing uses last epoch, validation dataset is not required.", end='\n\n')
+
+                # Create and initialize the test dataloader given the correct toolbox mode,
+            # a supported dataset name, and a valid dataset path
+            if config.TEST.DATA.DATASET and config.TEST.DATA.DATA_PATH:
+                test_data = test_loader(
+                    name="test",
+                    data_path=config.TEST.DATA.DATA_PATH,
+                    config_data=config.TEST.DATA)
+                data_loader_dict["test"] = DataLoader(
+                    dataset=test_data,
+                    num_workers=4,
+                    batch_size=config.INFERENCE.BATCH_SIZE,
+                    shuffle=False,
+                    worker_init_fn=seed_worker,
+                    generator=general_generator
+                )
+            else:
+                data_loader_dict['test'] = None
+
+            config.defrost()
+            for tf_bpf in tf_list:
+                config.DO_ORDER_BPF = tf_bpf
+                for tf_hilbert in tf_list:
+                    config.DO_HILBERT = tf_hilbert
+                    test(config, data_loader_dict)
 
     else:
         raise ValueError("Unsupported toolbox_mode! Currently support train_and_test or only_test or unsupervised_method.")
@@ -325,3 +442,5 @@ if __name__ == "__main__":
         unsupervised_method_inference(config, data_loader_dict)
     else:
         print("TOOLBOX_MODE only support train_and_test or only_test !", end='\n\n')
+
+    sys.stdout.close()

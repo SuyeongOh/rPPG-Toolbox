@@ -8,15 +8,16 @@ from scipy import signal
 import unsupervised_methods.utils as utils
 
 
-def CHROME_DEHAAN(frames,FS):
+def CHROME_DEHAAN(config, frames):
     LPF = 0.7
     HPF = 2.5
     WinSec = 1.6
-
+    FS = config.UNSUPERVISED.DATA.FS
     RGB = process_video(frames)
     FN = RGB.shape[0]
     NyquistF = 1/2*FS
-    B, A = signal.butter(3, [LPF/NyquistF, HPF/NyquistF], 'bandpass')
+
+    B, A = signal.butter(config.DO_ORDER_BPF, [LPF/NyquistF, HPF/NyquistF], 'bandpass')
 
     WinL = math.ceil(WinSec*FS)
     if(WinL % 2):

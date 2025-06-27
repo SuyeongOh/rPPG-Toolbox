@@ -6,6 +6,7 @@ from scipy import io as scio
 from scipy import linalg
 from scipy import signal
 from scipy import sparse
+from scipy.signal import filtfilt, butter, hilbert
 from skimage.util import img_as_float
 from sklearn.metrics import mean_squared_error
 
@@ -33,3 +34,17 @@ def process_video(frames):
     RGB = np.asarray(RGB)
     RGB = RGB.transpose(1, 0).reshape(1, 3, -1)
     return np.asarray(RGB)
+
+
+def _butterworth_filter(signal, fs, order):
+    low = 0.75
+    high = 2.5
+    [b, a] = butter(N=order, Wn=[low / fs * 2, high / fs * 2], btype='bandpass')
+    filtered_signal = filtfilt(b, a, signal.astype(np.double))
+    return filtered_signal
+
+def _hilbert_envelop(signal):
+    analytic_signal = hilbert(signal)
+    amplitude_envelope = np.abs(analytic_signal)
+    normalized_signal = signal / amplitude_envelope
+    return normalized_signal

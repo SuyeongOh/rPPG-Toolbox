@@ -1,4 +1,7 @@
 """Unsupervised learning methods including POS, GREEN, CHROME, ICA, LGI and PBV."""
+import csv
+import os
+
 import numpy as np
 from evaluation.post_process import *
 from unsupervised_methods.methods.CHROME_DEHAAN import *
@@ -6,10 +9,13 @@ from unsupervised_methods.methods.GREEN import *
 from unsupervised_methods.methods.ICA_POH import *
 from unsupervised_methods.methods.LGI import *
 from unsupervised_methods.methods.PBV import *
+from unsupervised_methods.methods.POS_VITALSYNC import POS_VITALSYNC
 from unsupervised_methods.methods.POS_WANG import *
 from unsupervised_methods.methods.OMIT import *
 from tqdm import tqdm
 from evaluation.BlandAltmanPy import BlandAltman
+
+headers = ['ENV', 'MAE', 'RMSE', 'MAPE', 'Pearson', 'SNR']
 
 def unsupervised_predict(config, data_loader, method_name):
     """ Model evaluation on the testing dataset."""
@@ -28,22 +34,35 @@ def unsupervised_predict(config, data_loader, method_name):
         for idx in range(batch_size):
             data_input, labels_input = test_batch[0][idx].cpu().numpy(), test_batch[1][idx].cpu().numpy()
             data_input = data_input[..., :3]
-            if method_name == "POS":
-                BVP = POS_WANG(data_input, config.UNSUPERVISED.DATA.FS)
+            if method_name == "POS_WANG":
+                BVP = POS_WANG(config, data_input, config.UNSUPERVISED.DATA.FS)
+            elif method_name == "POS_VITALSYNC":
+                BVP = POS_VITALSYNC(config, data_input, config.UNSUPERVISED.DATA.FS)
             elif method_name == "CHROM":
-                BVP = CHROME_DEHAAN(data_input, config.UNSUPERVISED.DATA.FS)
+                BVP = CHROME_DEHAAN(config, data_input)
             elif method_name == "ICA":
-                BVP = ICA_POH(data_input, config.UNSUPERVISED.DATA.FS)
+                BVP = ICA_POH(config, data_input)
             elif method_name == "GREEN":
                 BVP = GREEN(data_input)
+                if config.DO_ORDER_BPF != 0:
+                    BVP = utils._butterworth_filter(BVP, config.UNSUPERVISED.DATA.FS, config.DO_ORDER_BPF)
             elif method_name == "LGI":
                 BVP = LGI(data_input)
+                if config.DO_ORDER_BPF != 0:
+                    BVP = utils._butterworth_filter(BVP, config.UNSUPERVISED.DATA.FS, config.DO_ORDER_BPF)
             elif method_name == "PBV":
                 BVP = PBV(data_input)
+                if config.DO_ORDER_BPF != 0:
+                    BVP = utils._butterworth_filter(BVP, config.UNSUPERVISED.DATA.FS, config.DO_ORDER_BPF)
             elif method_name == "OMIT":
                 BVP = OMIT(data_input)
+                if config.DO_ORDER_BPF != 0:
+                    BVP = utils._butterworth_filter(BVP, config.UNSUPERVISED.DATA.FS, config.DO_ORDER_BPF)
             else:
                 raise ValueError("unsupervised method name wrong!")
+
+            if config.DO_HILBERT:
+                BVP = utils._hilbert_envelop(BVP)
 
             video_frame_size = test_batch[0].shape[1]
             if config.INFERENCE.EVALUATION_WINDOW.USE_SMALLER_WINDOW:
@@ -138,6 +157,19 @@ def unsupervised_predict(config, data_loader, method_name):
             else:
                 raise ValueError("Wrong Test Metric Type")
     elif config.INFERENCE.EVALUATION_METHOD == "FFT":
+        print(f"====== DISPLAY METRICS ======")
+        resize_size = config.UNSUPERVISED.DATA.PREPROCESS.RESIZE.W
+        print(
+            f"DATA IMAGE RESOLUTION: [{resize_size} x {resize_size}], ORDER_BPF={config.DO_ORDER_BPF}, HILBERT={config.DO_HILBERT}")
+        csv_file = f'result_{method_name}_{config.UNSUPERVISED.DATA.DATASET}.csv'
+
+        if not os.path.exists(csv_file):
+            with open(csv_file, mode='w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+
+        result_row = [f'{resize_size}x{resize_size}, ORDER={config.DO_ORDER_BPF}, HILBERT={config.DO_HILBERT}']
+
         predict_hr_fft_all = np.array(predict_hr_fft_all)
         gt_hr_fft_all = np.array(gt_hr_fft_all)
         SNR_all = np.array(SNR_all)
@@ -147,28 +179,29 @@ def unsupervised_predict(config, data_loader, method_name):
             if metric == "MAE":
                 MAE_FFT = np.mean(np.abs(predict_hr_fft_all - gt_hr_fft_all))
                 standard_error = np.std(np.abs(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
-                print("FFT MAE (FFT Label): {0} +/- {1}".format(MAE_FFT, standard_error))
+                result_row.append(f'{MAE_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT MAE (FFT Label): {0:.3f} +/- {1:.3f}".format(MAE_FFT, standard_error))
             elif metric == "RMSE":
-                # Calculate the squared errors, then RMSE, in order to allow
-                # for a more robust and intuitive standard error that won't
-                # be influenced by abnormal distributions of errors.
-                squared_errors = np.square(predict_hr_fft_all - gt_hr_fft_all)
-                RMSE_FFT = np.sqrt(np.mean(squared_errors))
-                standard_error = np.sqrt(np.std(squared_errors) / np.sqrt(num_test_samples))
-                print("FFT RMSE (FFT Label): {0} +/- {1}".format(RMSE_FFT, standard_error))
+                RMSE_FFT = np.sqrt(np.mean(np.square(predict_hr_fft_all - gt_hr_fft_all)))
+                standard_error = np.std(np.square(predict_hr_fft_all - gt_hr_fft_all)) / np.sqrt(num_test_samples)
+                result_row.append(f'{RMSE_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT RMSE (FFT Label): {0:.3f} +/- {1:.3f}".format(RMSE_FFT, standard_error))
             elif metric == "MAPE":
                 MAPE_FFT = np.mean(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) * 100
                 standard_error = np.std(np.abs((predict_hr_fft_all - gt_hr_fft_all) / gt_hr_fft_all)) / np.sqrt(num_test_samples) * 100
-                print("FFT MAPE (FFT Label): {0} +/- {1}".format(MAPE_FFT, standard_error))
+                result_row.append(f'{MAPE_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT MAPE (FFT Label): {0:.3f} +/- {1:.3f}".format(MAPE_FFT, standard_error))
             elif metric == "Pearson":
                 Pearson_FFT = np.corrcoef(predict_hr_fft_all, gt_hr_fft_all)
                 correlation_coefficient = Pearson_FFT[0][1]
                 standard_error = np.sqrt((1 - correlation_coefficient**2) / (num_test_samples - 2))
-                print("FFT Pearson (FFT Label): {0} +/- {1}".format(correlation_coefficient, standard_error))
+                result_row.append(f'{correlation_coefficient:.3f} ± {standard_error:.3f}')
+                print("FFT Pearson (FFT Label): {0:.3f} +/- {1:.3f}".format(correlation_coefficient, standard_error))
             elif metric == "SNR":
-                SNR_PEAK = np.mean(SNR_all)
+                SNR_FFT = np.mean(SNR_all)
                 standard_error = np.std(SNR_all) / np.sqrt(num_test_samples)
-                print("FFT SNR (FFT Label): {0} +/- {1} (dB)".format(SNR_PEAK, standard_error))
+                result_row.append(f'{SNR_FFT:.3f} ± {standard_error:.3f}')
+                print("FFT SNR (FFT Label): {0:.3f} +/- {1:.3f} (dB)".format(SNR_FFT, standard_error))
             elif metric == "MACC":
                 MACC_avg = np.mean(MACC_all)
                 standard_error = np.std(MACC_all) / np.sqrt(num_test_samples)
@@ -189,5 +222,10 @@ def unsupervised_predict(config, data_loader, method_name):
                     file_name=f'{filename_id}_FFT_BlandAltman_DifferencePlot.pdf')
             else:
                 raise ValueError("Wrong Test Metric Type")
+
+        with open(csv_file, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(result_row)
+
     else:
         raise ValueError("Inference evaluation method name wrong!")

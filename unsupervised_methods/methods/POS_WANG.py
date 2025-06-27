@@ -7,9 +7,14 @@ IEEE Transactions on Biomedical Engineering, 64(7), 1479-1491.
 import math
 
 import numpy as np
-from scipy import signal
+from scipy.signal import hilbert, butter, filtfilt
 from unsupervised_methods import utils
 
+def _hilbert_norm(signal):
+    analytic_signal = hilbert(signal)
+    amplitude_envelope = np.abs(analytic_signal)
+    normalized_signal = signal / amplitude_envelope
+    return normalized_signal
 
 def _process_video(frames):
     """Calculates the average value of each frame."""
@@ -20,7 +25,7 @@ def _process_video(frames):
     return np.asarray(RGB)
 
 
-def POS_WANG(frames, fs):
+def POS_WANG(config, frames, fs):
     WinSec = 1.6
     RGB = _process_video(frames)
     N = RGB.shape[0]
@@ -39,11 +44,12 @@ def POS_WANG(frames, fs):
                 h[0, temp] = h[0, temp] - mean_h
             H[0, m:n] = H[0, m:n] + (h[0])
 
-    BVP = H
-    BVP = utils.detrend(np.mat(BVP).H, 100)
-    BVP = np.asarray(np.transpose(BVP))[0]
-    b, a = signal.butter(1, [0.75 / fs * 2, 3 / fs * 2], btype='bandpass')
-    BVP = signal.filtfilt(b, a, BVP.astype(np.double))
+    BVP = H.squeeze()
+    #BVP = utils.detrend(np.mat(BVP).H, 100)
+    #BVP = np.asarray(np.transpose(BVP))[0]
+
+    if config.DO_ORDER_BPF != 0:
+        BVP = utils._butterworth_filter(BVP, config.UNSUPERVISED.DATA.FS, config.DO_ORDER_BPF)
     return BVP
 
 
