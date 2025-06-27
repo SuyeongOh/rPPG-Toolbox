@@ -10,3 +10,4 @@ import dataset.data_loader.BP4DPlusBigSmallLoader
 import dataset.data_loader.UBFCPHYSLoader
 import dataset.data_loader.vv100Loader
 import dataset.data_loader.vvAllLoader
+import dataset.data_loader.PhysDriveLoader
